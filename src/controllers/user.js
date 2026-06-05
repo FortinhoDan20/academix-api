@@ -1,6 +1,7 @@
 const asyncHandler = require("express-async-handler");
 const bcrypt = require("bcryptjs");
 const User = require("../models/user");
+const AuditLogger = require("../models/auditLog");
 
 /* =========================================================
    CREATE USER
@@ -22,10 +23,7 @@ const addUser = asyncHandler(async (req, res) => {
   const cleanUsername = nomUtilisateur.trim().toLowerCase();
 
   const userExist = await User.findOne({
-    $or: [
-      { email: cleanEmail },
-      { nomUtilisateur: cleanUsername },
-    ],
+    $or: [{ email: cleanEmail }, { nomUtilisateur: cleanUsername }],
   });
 
   if (userExist) {
@@ -38,9 +36,7 @@ const addUser = asyncHandler(async (req, res) => {
   let allowedRole = "secretaire";
 
   if (req.user.role === "admin") {
-    if (
-      ["manager", "caissier", "secretaire"].includes(role)
-    ) {
+    if (["manager", "caissier", "secretaire"].includes(role)) {
       allowedRole = role;
     }
   }
@@ -51,10 +47,7 @@ const addUser = asyncHandler(async (req, res) => {
 
   const defaultPassword = "012345";
 
-  const hashedPassword = await bcrypt.hash(
-    defaultPassword,
-    10
-  );
+  const hashedPassword = await bcrypt.hash(defaultPassword, 10);
 
   const user = await User.create({
     schoolId,
@@ -65,6 +58,18 @@ const addUser = asyncHandler(async (req, res) => {
     password: hashedPassword,
     mustChangePassword: true,
     createdBy: req.user.id,
+  });
+
+  await AuditLogger({
+    req,
+    module: "USER",
+    action: "CREATE",
+    description: `Création de l'utilisateur ${user.name}`,
+    metadata: {
+      targetUserId: user._id,
+      targetRole: user.role,
+      targetEmail: user.email,
+    },
   });
 
   res.status(201).json({
@@ -123,8 +128,7 @@ const getUsers = asyncHandler(async (req, res) => {
 ========================================================= */
 
 const getUserById = asyncHandler(async (req, res) => {
-  const user = await User.findById(req.params.id)
-    .select("-password");
+  const user = await User.findById(req.params.id).select("-password");
 
   if (!user) {
     return res.status(404).json({
@@ -135,8 +139,7 @@ const getUserById = asyncHandler(async (req, res) => {
 
   if (
     req.user.role !== "super_admin" &&
-    user.schoolId?.toString() !==
-      req.user.schoolId?.toString()
+    user.schoolId?.toString() !== req.user.schoolId?.toString()
   ) {
     return res.status(403).json({
       error: true,
@@ -164,10 +167,7 @@ const updateUser = asyncHandler(async (req, res) => {
     });
   }
 
-  if (
-    user.role === "super_admin" &&
-    req.user.role !== "super_admin"
-  ) {
+  if (user.role === "super_admin" && req.user.role !== "super_admin") {
     return res.status(403).json({
       error: true,
       message: "Action non autorisée",
@@ -226,7 +226,31 @@ const updateUser = asyncHandler(async (req, res) => {
 
   user.updatedBy = req.user.id;
 
+  const oldData = {
+    name: user.name,
+    email: user.email,
+    role: user.role,
+    isActive: user.isActive,
+  };
+
   await user.save();
+
+  await AuditLogger({
+    req,
+    module: "USER",
+    action: "UPDATE",
+    description: `Modification de l'utilisateur ${user.name}`,
+    metadata: {
+      targetUserId: user._id,
+      before: oldData,
+      after: {
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        isActive: user.isActive,
+      },
+    },
+  });
 
   res.status(200).json({
     error: false,
@@ -265,13 +289,24 @@ const toggleUserStatus = asyncHandler(async (req, res) => {
 
   targetUser.isActive = !targetUser.isActive;
 
-  targetUser.disabledAt =
-    targetUser.isActive ? null : new Date();
+  targetUser.disabledAt = targetUser.isActive ? null : new Date();
 
-  targetUser.disabledBy =
-    targetUser.isActive ? null : req.user.id;
+  targetUser.disabledBy = targetUser.isActive ? null : req.user.id;
 
   await targetUser.save();
+
+  await AuditLogger({
+    req,
+    module: "USER",
+    action: targetUser.isActive ? "ACTIVATE" : "DEACTIVATE",
+    description: `${
+      targetUser.isActive ? "Activation" : "Désactivation"
+    } de l'utilisateur ${targetUser.name}`,
+    metadata: {
+      targetUserId: targetUser._id,
+      targetRole: targetUser.role,
+    },
+  });
 
   res.status(200).json({
     error: false,

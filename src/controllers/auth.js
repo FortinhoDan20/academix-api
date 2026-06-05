@@ -3,7 +3,7 @@ const bcrypt = require("bcryptjs");
 const School = require('../models/school')
 const jwt = require('jsonwebtoken')
 const asyncHandler = require("express-async-handler");
-const loginLog = require("../models/loginLog");
+const LoginLog = require('../models/loginLog')
 
 
 const MAX_ATTEMPTS = Number(process.env.MAX_ATTEMPTS) || 5;
@@ -118,9 +118,12 @@ const loginUser = asyncHandler(async (req, res) => {
     const user = await User.findOne({ nomUtilisateur });
 
     const logData = {
-      ip: req.ip,
-      userAgent: req.headers["user-agent"],
-    };  
+      ip:
+        req.headers["x-forwarded-for"] ||
+        req.socket.remoteAddress ||
+        req.ip,
+      userAgent: req.headers["user-agent"] || "Unknown",
+    };
 
     const FAKE_HASH =
       process.env.FAKE_HASH ||
@@ -128,10 +131,20 @@ const loginUser = asyncHandler(async (req, res) => {
 
     let isMatch = false;
 
+    const saveFailedLog = async (message) => {
+      await LoginLog.create({
+        userId: user?._id || null,
+        schoolId: user?.schoolId || null,
+        ...logData,
+        status: "FAILED",
+        message,
+      });
+    };
+
     // ================================
     // CHECK LOCK
     // ================================
-    if (user && user.lockUntil && user.lockUntil > Date.now()) {
+    if (user?.lockUntil && user.lockUntil > Date.now()) {
       const remainingTime = Math.ceil(
         (user.lockUntil - Date.now()) / 1000
       );
@@ -139,12 +152,7 @@ const loginUser = asyncHandler(async (req, res) => {
       const minutes = Math.floor(remainingTime / 60);
       const seconds = remainingTime % 60;
 
-       await LoginLog.create({
-          userId: user._id,
-          ...logData,
-          status: "FAILED",
-          message: "Compte temporairement bloqué",
-        });
+      await saveFailedLog("Compte temporairement bloqué");
 
       return res.status(423).json({
         error: true,
@@ -155,7 +163,7 @@ const loginUser = asyncHandler(async (req, res) => {
     }
 
     // ================================
-    // PASSWORD CHECK (ANTI TIMING ATTACK)
+    // PASSWORD CHECK
     // ================================
     if (user) {
       isMatch = await bcrypt.compare(password, user.password);
@@ -178,11 +186,7 @@ const loginUser = asyncHandler(async (req, res) => {
         await user.save();
       }
 
-      await loginLog.create({
-        ...logData,
-        status: "FAILED",
-        message: "Identifiants incorrects",
-      });
+      await saveFailedLog("Identifiants incorrects");
 
       return res.status(401).json({
         error: true,
@@ -190,17 +194,11 @@ const loginUser = asyncHandler(async (req, res) => {
       });
     }
 
-   // ================================
+    // ================================
     // ACCOUNT STATUS
     // ================================
     if (!user.isActive) {
-
-      await LoginLog.create({
-      userId: user._id,
-      ...logData,
-      status: "FAILED",
-      message: "Compte utilisateur désactivé",
-    });
+      await saveFailedLog("Compte utilisateur désactivé");
 
       return res.status(403).json({
         error: true,
@@ -215,14 +213,8 @@ const loginUser = asyncHandler(async (req, res) => {
       const school = await School.findById(user.schoolId);
 
       if (!school) {
+        await saveFailedLog("École introuvable");
 
-         await LoginLog.create({
-          userId: user._id,
-          ...logData,
-          status: "FAILED",
-          message: "École introuvable",
-        });
-        
         return res.status(403).json({
           error: true,
           message: "École introuvable",
@@ -230,13 +222,7 @@ const loginUser = asyncHandler(async (req, res) => {
       }
 
       if (!school.isActive) {
-
-         await LoginLog.create({
-          userId: user._id,
-          ...logData,
-          status: "FAILED",
-          message: "École désactivée",
-        });
+        await saveFailedLog("École désactivée");
 
         return res.status(403).json({
           error: true,
@@ -246,22 +232,32 @@ const loginUser = asyncHandler(async (req, res) => {
     }
 
     // ================================
-    // RESET LOGIN ATTEMPTS
+    // RESET SECURITY
     // ================================
     user.loginAttempts = 0;
     user.lockUntil = null;
     user.lastLogin = new Date();
+    user.isAuthenticated = true;
 
-    
     await user.save();
 
-      await LoginLog.create({
-    userId: user._id,
-    schoolId: user.schoolId,
-    ...logData,
-    status: "SUCCESS",
-    message: "Connexion réussie",
-  });
+    // ================================
+    // LOGIN SUCCESS LOG
+    // ================================
+    await LoginLog.create({
+      userId: user._id,
+      schoolId: user.schoolId || null,
+      ...logData,
+      status: "SUCCESS",
+      message: "Connexion réussie",
+    });
+
+    // ================================
+    // JWT CHECK
+    // ================================
+    if (!process.env.JWT_SECRET) {
+      throw new Error("JWT_SECRET manquant");
+    }
 
     // ================================
     // GENERATE TOKEN
@@ -273,7 +269,9 @@ const loginUser = asyncHandler(async (req, res) => {
         schoolId: user.schoolId,
       },
       process.env.JWT_SECRET,
-      { expiresIn: process.env.JWT_EXPIRE || "1d" }
+      {
+        expiresIn: process.env.JWT_EXPIRE || "1d",
+      }
     );
 
     // ================================
@@ -290,18 +288,19 @@ const loginUser = asyncHandler(async (req, res) => {
         nomUtilisateur: user.nomUtilisateur,
         role: user.role,
         schoolId: user.schoolId,
+        isAuthenticated: user.isAuthenticated,
         lastLogin: user.lastLogin,
       },
     });
-  } catch (e) {
-    console.error("LOGIN ERROR :", e);
+  } catch (error) {
+    console.error("LOGIN ERROR:", error);
 
     return res.status(500).json({
       error: true,
       message: "Erreur serveur lors de la connexion",
     });
   }
-});
+})
 
 const getLoginHistory = asyncHandler(async (req, res) => {
   const logs = await LoginLog.find()
