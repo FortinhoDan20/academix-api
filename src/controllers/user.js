@@ -10,80 +10,92 @@ const AuditLogger = require("../models/auditLog");
 const addUser = asyncHandler(async (req, res) => {
   const { name, email, nomUtilisateur, role } = req.body;
 
-  const schoolId = req.user.schoolId;
+  console.log(req.body)
 
-  if (!name || !email || !nomUtilisateur) {
-    return res.status(400).json({
-      error: true,
-      message: "Tous les champs obligatoires",
-    });
-  }
-
-  const cleanEmail = email.trim().toLowerCase();
-  const cleanUsername = nomUtilisateur.trim().toLowerCase();
-
-  const userExist = await User.findOne({
-    $or: [{ email: cleanEmail }, { nomUtilisateur: cleanUsername }],
-  });
-
-  if (userExist) {
-    return res.status(409).json({
-      error: true,
-      message: "Utilisateur déjà existant",
-    });
-  }
-
-  let allowedRole = "secretaire";
-
-  if (req.user.role === "admin") {
-    if (["manager", "caissier", "secretaire"].includes(role)) {
-      allowedRole = role;
+  try {
+    
+    const schoolId = req.user.schoolId;
+  
+    if (!name || !email || !nomUtilisateur) {
+      return res.status(400).json({
+        error: true,
+        message: "Tous les champs obligatoires",
+      });
     }
+  
+    const cleanEmail = email.trim().toLowerCase();
+    const cleanUsername = nomUtilisateur.trim().toLowerCase();
+  
+    const userExist = await User.findOne({
+      $or: [{ email: cleanEmail }, { nomUtilisateur: cleanUsername }],
+    });
+  
+    if (userExist) {
+      return res.status(409).json({
+        error: true,
+        message: "Utilisateur déjà existant",
+      });
+    }
+  
+    let allowedRole = "secretaire";
+  
+    if (req.user.role === "admin") {
+      if (["manager", "caissier", "secretaire"].includes(role)) {
+        allowedRole = role;
+      }
+    }
+  
+    if (req.user.role === "super_admin") {
+      allowedRole = role || "admin";
+    }
+  
+    const defaultPassword = "012345";
+  
+    const hashedPassword = await bcrypt.hash(defaultPassword, 10);
+  
+    const user = await User.create({
+      schoolId,
+      name: name.trim(),
+      email: cleanEmail,
+      nomUtilisateur: cleanUsername,
+      role: allowedRole,
+      password: hashedPassword,
+      mustChangePassword: true,
+      createdBy: req.user.id,
+    });
+  
+    await AuditLogger({
+      req,
+      module: "USER",
+      action: "CREATE",
+      description: `Création de l'utilisateur ${user.name}`,
+      metadata: {
+        targetUserId: user._id,
+        targetRole: user.role,
+        targetEmail: user.email,
+      },
+    });
+  
+    res.status(201).json({
+      error: false,
+      message: "Utilisateur créé avec succès",
+      tempPassword: defaultPassword,
+      data: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        nomUtilisateur: user.nomUtilisateur,
+        role: user.role,
+      },
+    });
+  } catch (e) {
+    console.log("ERREUR REELLE :", e)
+    res.status(500).json({
+      error: true,
+      message: e.message
+    })
   }
 
-  if (req.user.role === "super_admin") {
-    allowedRole = role || "admin";
-  }
-
-  const defaultPassword = "012345";
-
-  const hashedPassword = await bcrypt.hash(defaultPassword, 10);
-
-  const user = await User.create({
-    schoolId,
-    name: name.trim(),
-    email: cleanEmail,
-    nomUtilisateur: cleanUsername,
-    role: allowedRole,
-    password: hashedPassword,
-    mustChangePassword: true,
-    createdBy: req.user.id,
-  });
-
-  await AuditLogger({
-    req,
-    module: "USER",
-    action: "CREATE",
-    description: `Création de l'utilisateur ${user.name}`,
-    metadata: {
-      targetUserId: user._id,
-      targetRole: user.role,
-      targetEmail: user.email,
-    },
-  });
-
-  res.status(201).json({
-    error: false,
-    message: "Utilisateur créé avec succès",
-    tempPassword: defaultPassword,
-    data: {
-      id: user._id,
-      name: user.name,
-      email: user.email,
-      nomUtilisateur: user.nomUtilisateur,
-      role: user.role,
-    },
-  });
 });
 
 /* =========================================================
@@ -128,7 +140,9 @@ const getUsers = asyncHandler(async (req, res) => {
 ========================================================= */
 
 const getUserById = asyncHandler(async (req, res) => {
-  const user = await User.findById(req.params.id).select("-password");
+  const user = await User.findById(req.params.id)
+    .populate("schoolId", "SchoolName address phone") // 👈 école pour affichage UI
+    .select("-password");
 
   if (!user) {
     return res.status(404).json({
@@ -137,19 +151,45 @@ const getUserById = asyncHandler(async (req, res) => {
     });
   }
 
-  if (
-    req.user.role !== "super_admin" &&
-    user.schoolId?.toString() !== req.user.schoolId?.toString()
-  ) {
+  // ================================
+  // ACCESS CONTROL (IMPORTANT)
+  // ================================
+  const isSuperAdmin = req.user.role === "super_admin";
+
+  const sameSchool =
+    user.schoolId &&
+    req.user.schoolId &&
+    user.schoolId._id.toString() === req.user.schoolId.toString();
+
+  if (!isSuperAdmin && !sameSchool) {
     return res.status(403).json({
       error: true,
       message: "Accès refusé",
     });
   }
 
-  res.status(200).json({
+  // ================================
+  // RESPONSE CLEAN
+  // ================================
+  return res.status(200).json({
     error: false,
-    data: user,
+    data: {
+      id: user._id,
+      name: user.name,
+      email: user.email,
+      nomUtilisateur: user.nomUtilisateur,
+      role: user.role,
+      isActive: user.isActive,
+      lastLogin: user.lastLogin,
+      school: user.schoolId
+        ? {
+            id: user.schoolId._id,
+            name: user.schoolId.SchoolName  ,
+            address: user.schoolId.address,
+            phone: user.schoolId.phone,
+          }
+        : null,
+    },
   });
 });
 

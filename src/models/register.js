@@ -11,25 +11,53 @@ const registerSchema = new mongoose.Schema({
     ref: "Student",
     required: true
   },
-  anneeScolaire: {
+  yearId: {
     type: String,
+    ref: "Year",
     required: true
   },
-  classe: String,
-  dateInscription: {
+  cycleId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "Cycle",
+    required: true
+  },
+  sectionId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "Section",
+    
+  },
+  optionId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "Option",
+  },
+  classroomId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "Classroom",
+    required: true
+  },
+  
+  registerDate: {
     type: Date,
     default: Date.now
   },
-  statut: {
-    type: String,
-    default: "actif"
-  },
+
+  registrationFeePaid: {
+  type: Boolean,
+  default: false
+},
+
+  tuitionStatus: {
+  type: String,
+  enum: ["Unpaid", "Partial", "Paid"],
+  default: "Unpaid"
+},
 
   // 💰 Gestion financière
+  fraisInscription: { type: Number, required: true },
   fraisTotal: { type: Number, required: true },
   montantPaye: { type: Number, default: 0 },
-  reste: { type: Number, default: 0 }
+  reste: { type: Number, required: true }
 
 }, { timestamps: true });
 
-module.exports = mongoose.model("Inscription", registerSchema);
+module.exports = mongoose.model("Register", registerSchema);

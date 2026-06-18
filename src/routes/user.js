@@ -10,7 +10,7 @@ router.get('/all-users', auth, getAllUsers)
 
 router.get('/school-users', auth, getUsers)
 
-router.get('/user/:id', auth, getUserById)
+router.get('/:id', auth, getUserById)
 
 router.patch('/user/update/:id', auth, updateUser)
 

@@ -1,18 +1,29 @@
 const mongoose = require("mongoose");
 
 const paymentSchema = new mongoose.Schema({
+  paymentNumber: {
+    type: String,
+    unique: true,
+  },
   schoolId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "School",
     required: true
   },
-  inscriptionId: {
+  registerId: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: "Inscription",
+    ref: "Register",
     required: true
   },
-  montant: { type: Number, required: true },
-  typeFrais: String,
+  cashierId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "User",
+    required: true
+  },
+  amountPaid: { type: Number, required: true },
+
+  typeFee: String,
+
   modePaiement: String,
   date: {
     type: Date,
