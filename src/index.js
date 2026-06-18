@@ -11,6 +11,15 @@ connectDB();
 app.use(cors());
 app.use(express.json());
 
+// Route de test
+app.get("/", (req, res) => {
+    res.status(200).json({
+        state: true,
+        message: "WELCOME TO ACADEMIX-ERP MANAGEMENT",
+    });
+});
+
+
 // routes
 const routesPath = path.join(__dirname, "./routes")
 if (fs.existsSync(routesPath)) {
