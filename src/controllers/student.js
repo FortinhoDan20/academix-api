@@ -136,7 +136,7 @@ const addStudent = async (req, res) => {
           classroomId,
 
           registrationFeePaid: false,
-
+          fraisInscription:fees.amount,
           tuitionStatus: "Unpaid",
 
           fraisTotal: fees.total,
