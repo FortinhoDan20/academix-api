@@ -9,7 +9,7 @@ router.post('/add', auth,  newRegisterPaid)
 
 router.get('/all', auth, getAllRegisterPaid)
 
-router.get('/:id', auth, getRegisterRecu)
+router.get('/:id', getRegisterRecu)
 
 
 module.exports = router
