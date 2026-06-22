@@ -5,6 +5,7 @@ const RevAcademix = require("../models/revAcademix");
 const RevSchool = require("../models/revSchool");
 const asyncHandler = require("express-async-handler");
 const Register = require("../models/register");
+const generatePaymentNumber = require("../utils/generatePaymentNumber");
 
 const newRegisterPaid = asyncHandler(async (req, res) => {
   try {
