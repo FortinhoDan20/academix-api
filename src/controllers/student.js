@@ -78,7 +78,7 @@ const addStudent = async (req, res) => {
     const fees = await Fees.findOne({
       schoolId: req.user.schoolId,
       cycleId,
-      feeType: "scolaire",
+      feeType: "inscription",
     });
 
     if (!fees) {
