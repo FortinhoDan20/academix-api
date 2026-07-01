@@ -1,15 +1,17 @@
 const Student = require("../models/student");
-const Register = require('../models/register')
-const Fees = require('../models/fees')
+const Register = require("../models/register");
+const Payment = require("../models/payment");
+const Fees = require("../models/fees");
+const Classroom = require("../models/classroom");
 const QRCode = require("qrcode");
 const AuditLogger = require("../models/auditLog");
 
 const mongoose = require("mongoose");
 
 const addStudent = async (req, res) => {
-    const session = await mongoose.startSession();
+  const session = await mongoose.startSession();
 
-    try {
+  try {
     session.startTransaction();
 
     const {
@@ -55,9 +57,7 @@ const addStudent = async (req, res) => {
     const birthDate = new Date(dateNaissance);
 
     if (isNaN(birthDate.getTime())) {
-      throw new Error(
-        "Format de date invalide. Utilisez YYYY-MM-DD."
-      );
+      throw new Error("Format de date invalide. Utilisez YYYY-MM-DD.");
     }
 
     // ================= MATRICULE =================
@@ -69,9 +69,10 @@ const addStudent = async (req, res) => {
       schoolId: req.user.schoolId,
     });
 
-    const matricule = `${shortYear}${String(
-      totalStudents + 1
-    ).padStart(5, "0")}`;
+    const matricule = `${shortYear}${String(totalStudents + 1).padStart(
+      5,
+      "0",
+    )}`;
 
     // ================= FRAIS =================
 
@@ -79,12 +80,30 @@ const addStudent = async (req, res) => {
       schoolId: req.user.schoolId,
       cycleId,
       feeType: "inscription",
+      status: "ONGOING",
     });
 
     if (!fees) {
-      throw new Error(
-        "Aucun frais scolaire configuré pour ce cycle."
-      );
+      throw new Error("Aucun frais scolaire configuré pour ce cycle.");
+    }
+
+    const totalRegister = await Register.countDocuments({
+      classroomId,
+      yearId,
+    });
+
+    const classroom = await Classroom.findById(classroomId);
+
+    if (!classroom) {
+      return res.status(404).json({
+        message: "Salle de classe introuvable",
+      });
+    }
+
+    if (totalRegister >= classroom.nombrePlace) {
+      return res.status(400).json({
+        message: "Cette salle est déjà complète.",
+      });
     }
 
     // ================= STUDENT =================
@@ -107,7 +126,7 @@ const addStudent = async (req, res) => {
           telephoneMere,
         },
       ],
-      { session }
+      { session },
     );
 
     const createdStudent = student[0];
@@ -136,7 +155,7 @@ const addStudent = async (req, res) => {
           classroomId,
 
           registrationFeePaid: false,
-          fraisInscription:fees.amount,
+          fraisInscription: fees.amount,
           tuitionStatus: "Unpaid",
 
           fraisTotal: fees.total,
@@ -144,66 +163,64 @@ const addStudent = async (req, res) => {
           reste: fees.total,
         },
       ],
-      { session }
+      { session },
     );
 
-const createdRegister = register[0];
+    const createdRegister = register[0];
 
-// ================= AUDIT STUDENT =================
+    // ================= AUDIT STUDENT =================
 
-await AuditLogger({
-  req,
-  module: "STUDENT",
-  action: "CREATE",
-  description: `Nouvel élève enregistré : ${createdStudent.nom} ${createdStudent.postnom}`,
-  metadata: {
-    studentId: createdStudent._id,
-    matricule: createdStudent.matricule,
-  },
-});
+/*     await AuditLogger.create({
+      req,
+      module: "STUDENT",
+      action: "CREATE",
+      description: `Nouvel élève enregistré : ${createdStudent.nom} ${createdStudent.postnom}`,
+      metadata: {
+        studentId: createdStudent._id,
+        matricule: createdStudent.matricule,
+      },
+    });
 
-// ================= AUDIT REGISTER =================
+    // ================= AUDIT REGISTER =================
 
-await AuditLogger({
-  req,
-  module: "REGISTER",
-  action: "CREATE",
-  description: `Nouvelle inscription : ${createdStudent.nom} ${createdStudent.postnom}`,
-  metadata: {
-    registerId: createdRegister._id,
-    studentId: createdStudent._id,
-  },
-});
+    await AuditLogger.create({
+      req,
+      module: "REGISTER",
+      action: "CREATE",
+      description: `Nouvelle inscription : ${createdStudent.nom} ${createdStudent.postnom}`,
+      metadata: {
+        registerId: createdRegister._id,
+        studentId: createdStudent._id,
+      },
+    }); */
 
-// ================= COMMIT =================
+    // ================= COMMIT =================
 
-await session.commitTransaction();
+    await session.commitTransaction();
 
-return res.status(201).json({
-  error: false,
-  message: "Élève enregistré avec succès",
-  data: {
-    student: createdStudent,
-    register: createdRegister,
-  },
-});
+    return res.status(201).json({
+      error: false,
+      message: "Élève enregistré avec succès",
+      data: {
+        student: createdStudent,
+        register: createdRegister,
+      },
+    });
+  } catch (error) {
+    await session.abortTransaction();
 
-} catch (error) {
-await session.abortTransaction();
-
-return res.status(500).json({
-  error: true,
-  message: error.message,
-});
-
-} finally {
-session.endSession();
-}
+    return res.status(500).json({
+      error: true,
+      message: error.message,
+    });
+  } finally {
+    session.endSession();
+  }
 };
 
 const getAllStudents = async (req, res) => {
   try {
-    const students = await Student.find({ schoolId: req.user.schoolId})
+    const students = await Student.find({ schoolId: req.user.schoolId })
       .populate("schoolId")
       .sort({ createdAt: -1 });
 
@@ -221,7 +238,35 @@ const getStudentById = async (req, res) => {
       return res.status(404).json({ message: "Student not found" });
     }
 
-    res.json(student);
+    const registers = await Register.find({
+      studentId: req.params.id,
+    })
+      .populate("yearId", "year")
+      .populate("cycleId", "name")
+      .populate("sectionId", "name")
+      .populate("optionId", "name")
+      .populate("classroomId", "name");
+
+    const registersWithPayments = await Promise.all(
+      registers.map(async (register) => {
+        const payments = await Payment.find({
+          registerId: register._id,
+        }).populate("cashierId", "nom prenom");
+
+        return {
+          ...register.toObject(),
+          payments,
+        };
+      }),
+    );
+
+    res.json({
+      error: false,
+      data: {
+        student,
+        registers: registersWithPayments,
+      },
+    });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -232,7 +277,7 @@ const updateStudent = async (req, res) => {
     const updated = await Student.findByIdAndUpdate(
       req.params.id,
       { $set: req.body },
-      { new: true }
+      { returnDocument: "after" },
     );
 
     if (!updated) {
@@ -248,10 +293,9 @@ const updateStudent = async (req, res) => {
   }
 };
 
-
 module.exports = {
   addStudent,
   getAllStudents,
   getStudentById,
-  updateStudent
+  updateStudent,
 };

@@ -6,6 +6,10 @@ const yearSchema = new mongoose.Schema({
     year: {
         type: String,
         require: true
+    },
+    current: {
+        type: Boolean,
+        default: true
     }
 })
 

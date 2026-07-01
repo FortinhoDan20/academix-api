@@ -56,6 +56,17 @@ const createFees = asyncHandler(async (req, res) => {
 
     const total = baseAmount + systemFee;
 
+    const feesOngoing = await Fees.findOne({ status:"ONGOING" })
+
+    if(!feesOngoing){
+      return res.status(400).json({
+        success: false,
+        message: "le frais en cours n'existe pas"
+      })
+    }
+
+    await Fees.findByIdAndUpdate(feesOngoing._id, { status:"ANTERIOR"})
+
     // 💾 SAVE
     const fees = await Fees.create({
       schoolId: req.user.schoolId,

@@ -7,7 +7,10 @@ const generatePaymentNumber = async (schoolId) => {
   const counter = await Counter.findOneAndUpdate(
     { name: "payment", schoolId, year },
     { $inc: { seq: 1 } },
-    { new: true, upsert: true }
+    {
+    returnDocument: "after",
+    upsert: true
+  }
   );
 
   const number = counter.seq.toString().padStart(5, "0");

@@ -50,6 +50,11 @@ const feesSchema = new mongoose.Schema(
       type: Number,
       required: true,
     },
+    status: {
+      type: String,
+      enum: ["ONGOING", "ANTERIOR"],
+      default: "ONGOING",
+    },
   },
   { timestamps: true }
 );

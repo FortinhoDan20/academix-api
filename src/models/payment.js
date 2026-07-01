@@ -22,6 +22,11 @@ const paymentSchema = new mongoose.Schema({
   },
   amountPaid: { type: Number, required: true },
 
+  month: {
+    type: Number
+
+  },
+
   typeFee: String,
 
   modePaiement: String,
